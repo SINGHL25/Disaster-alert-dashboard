@@ -1,6 +1,8 @@
-streamlit
-pandas
-requests
-plotly
+
 weather-au
 
+streamlit>=1.20
+pandas>=1.5
+requests>=2.28
+plotly>=5.9
+pytz
