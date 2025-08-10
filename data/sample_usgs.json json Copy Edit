@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2025-08-09T01:22:00Z",
+    "source": "USGS",
+    "area": "California, USA",
+    "severity": "moderate",
+    "category": "earthquake",
+    "title": "M 4.6 - 10km SW of Napa, California",
+    "description": "An earthquake of magnitude 4.6 occurred near Napa, CA at a depth of 8 km."
+  }
+]
