@@ -1,0 +1,11 @@
+[
+  {
+    "date": "2025-08-09T04:10:00Z",
+    "source": "NWS",
+    "area": "Texas, USA",
+    "severity": "severe",
+    "category": "tornado",
+    "title": "Tornado Warning",
+    "description": "Tornado detected near Dallas County, seek shelter immediately."
+  }
+]
