@@ -1,1 +1,21 @@
+[
+  {
+    "date": "2025-08-09T02:30:00Z",
+    "source": "BOM",
+    "area": "Sydney, NSW",
+    "severity": "severe",
+    "category": "weather",
+    "title": "Severe Thunderstorm Warning",
+    "description": "Heavy rainfall, damaging winds and large hailstones expected in Sydney metropolitan area."
+  },
+  {
+    "date": "2025-08-09T05:00:00Z",
+    "source": "BOM",
+    "area": "Brisbane, QLD",
+    "severity": "moderate",
+    "category": "flood",
+    "title": "Flood Watch",
+    "description": "Minor flooding possible along Brisbane River following heavy rainfall."
+  }
+]
 
