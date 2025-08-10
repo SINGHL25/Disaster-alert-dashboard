@@ -1,7 +1,6 @@
 # utils/parser.py
 # utils/parser.py
 import pandas as pd
-from datetime import datetime
 
 def unify_alerts_to_df(alerts_dict):
     """Unify alerts from multiple sources into one DataFrame."""
@@ -12,7 +11,7 @@ def unify_alerts_to_df(alerts_dict):
             continue
 
         # USGS Earthquake format
-        if source == "USGS" and "features" in data:
+        if source == "USGS" and isinstance(data, dict) and "features" in data:
             for feat in data["features"]:
                 props = feat.get("properties", {})
                 all_rows.append({
@@ -25,7 +24,7 @@ def unify_alerts_to_df(alerts_dict):
                 })
 
         # NWS Alerts
-        elif source == "NWS" and "features" in data:
+        elif source == "NWS" and isinstance(data, dict) and "features" in data:
             for feat in data["features"]:
                 props = feat.get("properties", {})
                 all_rows.append({
@@ -65,17 +64,21 @@ def unify_alerts_to_df(alerts_dict):
     # Create DataFrame
     df = pd.DataFrame(all_rows)
 
-    # Ensure date column exists
-    if not df.empty:
-        if "date" not in df.columns:
-            df["date"] = pd.NaT
-        df = df.sort_values("date", ascending=False)
+    if df.empty:
+        return df
 
-        # Ensure category column exists
-        if "category" not in df.columns or df["category"].isnull().all():
-            df["category"] = df.get("source", "unknown")
+    # Ensure date column is proper datetime and sortable
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+    # Ensure category column exists
+    if "category" not in df.columns or df["category"].isnull().all():
+        df["category"] = df.get("source", "unknown")
+
+    # Sort safely
+    df = df.sort_values(by="date", ascending=False, na_position="last")
 
     return df
+
 
 
 
