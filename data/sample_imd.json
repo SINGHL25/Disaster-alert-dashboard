@@ -1,38 +1,21 @@
 [
   {
-    "id": "IMD20250810-001",
-    "title": "Cyclone Warning for Odisha Coast",
-    "description": "A cyclonic storm is expected to cross Odisha coast between Paradip and Chandbali by midnight of 11th August. Wind speed likely to reach 90-100 km/h with heavy rainfall in coastal districts.",
-    "category": "Cyclone",
-    "severity": "Severe",
-    "urgency": "Immediate",
-    "area": "Odisha, Coastal Andhra Pradesh",
-    "coordinates": [85.8569, 20.2961],
+    "date": "2025-08-09T03:15:00Z",
     "source": "IMD",
-    "date": "2025-08-10T06:00:00+05:30"
+    "area": "Mumbai, Maharashtra",
+    "severity": "severe",
+    "category": "cyclone",
+    "title": "Cyclone Warning",
+    "description": "Cyclone formation in the Arabian Sea expected to make landfall near Mumbai within 48 hours."
   },
   {
-    "id": "IMD20250810-002",
-    "title": "Heavy Rainfall Warning for Mumbai",
-    "description": "Extremely heavy rainfall (>200 mm) likely over Mumbai and adjoining districts during next 24 hours. Possible waterlogging and traffic disruption.",
-    "category": "Rainfall",
-    "severity": "Moderate",
-    "urgency": "Expected",
-    "area": "Mumbai, Thane, Navi Mumbai",
-    "coordinates": [72.8777, 19.0760],
+    "date": "2025-08-09T06:45:00Z",
     "source": "IMD",
-    "date": "2025-08-10T09:30:00+05:30"
-  },
-  {
-    "id": "IMD20250810-003",
-    "title": "Heatwave Alert for Rajasthan",
-    "description": "Heatwave conditions likely to prevail over western Rajasthan districts. Max temperature may exceed 45°C. Avoid prolonged exposure to sunlight.",
-    "category": "Heatwave",
-    "severity": "High",
-    "urgency": "Expected",
-    "area": "Jaisalmer, Barmer, Bikaner",
-    "coordinates": [71.7819, 26.9157],
-    "source": "IMD",
-    "date": "2025-08-10T11:00:00+05:30"
+    "area": "Delhi, NCR",
+    "severity": "moderate",
+    "category": "heatwave",
+    "title": "Heatwave Alert",
+    "description": "Temperatures expected to exceed 44°C in Delhi NCR region."
   }
 ]
+
