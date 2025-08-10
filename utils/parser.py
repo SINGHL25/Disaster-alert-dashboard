@@ -1,196 +1,266 @@
 # utils/parser.py
 import pandas as pd
+import json
+import re
 from datetime import datetime
-import pytz
+from pathlib import Path
 
-def _usgs_feature_to_row(f):
-    prop = f.get("properties", {})
-    geom = f.get("geometry", {}) or {}
-    coords = geom.get("coordinates") or [None, None, None]
-    lon, lat = coords[0], coords[1] if len(coords) >= 2 else (None, None)
-    mag = prop.get("mag")
-    place = prop.get("place")
-    time_ms = prop.get("time")
-    ts = datetime.utcfromtimestamp(time_ms/1000) if time_ms else None
-    return {
-        "id": f.get("id"),
-        "title": f"{'Earthquake'}: M{mag} {place}" if place else f"Earthquake M{mag}",
-        "description": prop.get("title") or prop.get("detail") or "",
-        "category": "earthquake",
-        "severity": "warning" if (mag and mag >= 5.0) else "advisory",
-        "urgency": None,
-        "area": place,
-        "lat": lat,
-        "lon": lon,
-        "source": "USGS",
-        "date": ts,
-        "raw": f
-    }
+def load_file(file_path):
+    """
+    Load and parse a file (JSON, CSV, TXT, LOG).
+    Detects source type (BOM, IMD, generic logs).
+    Returns DataFrame with unified schema.
+    """
+    path = Path(file_path)
+    suffix = path.suffix.lower()
 
-def _nws_feature_to_row(f):
-    prop = f.get("properties", {})
-    title = prop.get("headline") or prop.get("event") or prop.get("headline")
-    desc = prop.get("description") or prop.get("instruction") or ""
-    severity = prop.get("severity") or ""
-    area = prop.get("areaDesc") or prop.get("affectedZones") or ""
-    sent = prop.get("sent")
     try:
-        ts = pd.to_datetime(sent)
-    except Exception:
-        ts = None
-    geom = prop.get("geometry") or {}
-    # if geometry present: get a coordinate
-    lat = lon = None
-    if geom:
-        coords = geom.get("coordinates")
-        if isinstance(coords, list) and len(coords) >= 2:
-            lon, lat = coords[0], coords[1]
-    return {
-        "id": prop.get("id") or prop.get("@id"),
-        "title": title,
-        "description": desc,
-        "category": prop.get("event") or "weather",
-        "severity": severity,
-        "urgency": prop.get("urgency"),
-        "area": area,
-        "lat": lat,
-        "lon": lon,
-        "source": "NWS",
-        "date": ts,
-        "raw": f
-    }
+        if suffix in [".json"]:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+
+            # Detect IMD
+            if _is_imd_json(raw):
+                rows = _imd_to_rows(raw)
+                return pd.DataFrame(rows)
+
+            # Detect BOM
+            if _is_bom_json(raw):
+                rows = _bom_to_rows(raw)
+                return pd.DataFrame(rows)
+
+            # Unknown JSON -> flatten
+            return pd.json_normalize(raw)
+
+        elif suffix in [".csv", ".xls", ".xlsx"]:
+            df = pd.read_csv(path) if suffix == ".csv" else pd.read_excel(path)
+            return _normalize_csv(df)
+
+        elif suffix in [".txt", ".log"]:
+            return _parse_generic_log(path)
+
+        else:
+            print(f"Unsupported file type: {suffix}")
+            return pd.DataFrame()
+
+    except Exception as e:
+        print(f"Error loading file {file_path}: {e}")
+        return pd.DataFrame()
+
+
+def _is_imd_json(raw):
+    """Detect if JSON is in IMD-like format."""
+    if isinstance(raw, list):
+        for r in raw:
+            if isinstance(r, dict) and (
+                "phenomenon" in r or "event_type" in r or "headline" in r
+            ):
+                return True
+    if isinstance(raw, dict):
+        for k in raw.keys():
+            if "bulletin" in k.lower() or "imd" in k.lower():
+                return True
+    return False
+
+
+def _is_bom_json(raw):
+    """Detect if JSON is in BOM-like format."""
+    if isinstance(raw, list):
+        for r in raw:
+            if isinstance(r, dict) and ("geometry" in r or "properties" in r):
+                return True
+    if isinstance(raw, dict):
+        if "features" in raw and isinstance(raw["features"], list):
+            return True
+    return False
+
+
+def _imd_to_rows(raw):
+    """
+    Robust IMD JSON parser for the sample structure above.
+    Converts IMD entries (list or dict) into unified row dicts.
+    """
+    rows = []
+    if not raw:
+        return rows
+
+    if isinstance(raw, list):
+        for r in raw:
+            _id = r.get("id") or r.get("bulletinId") or None
+            title = r.get("headline") or r.get("event_type") or r.get("title") or ""
+            description = r.get("description") or r.get("desc") or ""
+            instruction = r.get("instruction") or r.get("advice") or ""
+            severity = r.get("severity") or ""
+            area = r.get("area") or r.get("region") or r.get("areaName") or ""
+            lat = r.get("lat")
+            lon = r.get("lon")
+            issued = r.get("issued") or r.get("issueTime") or r.get("effective") or None
+
+            try:
+                date = pd.to_datetime(issued) if issued else None
+            except Exception:
+                date = None
+
+            rows.append({
+                "id": _id,
+                "title": title,
+                "description": description,
+                "instruction": instruction,
+                "category": r.get("phenomenon") or r.get("event_type") or "imd",
+                "severity": severity,
+                "urgency": r.get("urgency") or "",
+                "area": area,
+                "lat": lat,
+                "lon": lon,
+                "source": "IMD",
+                "date": date,
+                "raw": r
+            })
+        return rows
+
+    if isinstance(raw, dict):
+        for key in ("bulletins", "alerts", "warnings", "data", "items"):
+            if key in raw and isinstance(raw[key], list):
+                return _imd_to_rows(raw[key])
+        for k, v in raw.items():
+            if isinstance(v, list):
+                rows.extend(_imd_to_rows(v))
+        return rows
+
+    return rows
+
 
 def _bom_to_rows(raw):
     """
-    raw: sample JSON structure for BOM. This is a heuristic parser for sample data.
-    If your BOM source differs, modify this function accordingly.
+    Convert BOM GeoJSON or alert JSON to unified schema.
     """
     rows = []
-    if not raw:
-        return rows
-    # If raw contains 'warnings' or similar key
-    items = None
-    if isinstance(raw, dict):
-        if "features" in raw:
-            items = raw["features"]
-            # treat like geojson
-            for f in items:
-                prop = f.get("properties", {})
+    if isinstance(raw, dict) and "features" in raw:
+        for feat in raw["features"]:
+            props = feat.get("properties", {})
+            coords = None
+            if "geometry" in feat and feat["geometry"]:
+                coords = feat["geometry"].get("coordinates")
+            lat = lon = None
+            if coords and isinstance(coords, (list, tuple)):
+                lon, lat = coords[:2]
+
+            title = props.get("headline") or props.get("event") or ""
+            desc = props.get("description") or ""
+            date_str = props.get("sent") or props.get("onset") or None
+            try:
+                date = pd.to_datetime(date_str) if date_str else None
+            except Exception:
+                date = None
+
+            rows.append({
+                "id": props.get("id") or props.get("event_id") or None,
+                "title": title,
+                "description": desc,
+                "instruction": props.get("instruction") or "",
+                "category": props.get("event") or "bom",
+                "severity": props.get("severity") or "",
+                "urgency": props.get("urgency") or "",
+                "area": props.get("areaDesc") or "",
+                "lat": lat,
+                "lon": lon,
+                "source": "BOM",
+                "date": date,
+                "raw": props
+            })
+    return rows
+
+
+def _normalize_csv(df):
+    """
+    Try to standardize CSV to unified schema columns.
+    """
+    cols = [c.lower() for c in df.columns]
+    mapping = {}
+    for col in df.columns:
+        lc = col.lower()
+        if "title" in lc or "event" in lc:
+            mapping[col] = "title"
+        elif "desc" in lc:
+            mapping[col] = "description"
+        elif "severity" in lc:
+            mapping[col] = "severity"
+        elif "lat" in lc:
+            mapping[col] = "lat"
+        elif "lon" in lc or "long" in lc:
+            mapping[col] = "lon"
+        elif "area" in lc:
+            mapping[col] = "area"
+        elif "date" in lc or "time" in lc:
+            mapping[col] = "date"
+    df = df.rename(columns=mapping)
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["source"] = "CSV"
+    return df
+
+
+def _parse_generic_log(path):
+    """
+    Parse TXT/LOG file with regex for datetime + severity + message.
+    """
+    rows = []
+    pattern = re.compile(
+        r'(?P<date>\d{4}[-/]\d{2}[-/]\d{2}[\sT]\d{2}:\d{2}:\d{2})'
+        r'.*?(?P<severity>INFO|WARN|WARNING|ERROR|CRITICAL|ALARM)'
+        r'.*?(?P<msg>.+)', re.IGNORECASE
+    )
+
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            m = pattern.search(line)
+            if m:
+                try:
+                    date = pd.to_datetime(m.group("date"))
+                except Exception:
+                    date = None
                 rows.append({
-                    "id": prop.get("id"),
-                    "title": prop.get("headline") or prop.get("type") or "BOM warning",
-                    "description": prop.get("description") or "",
-                    "category": prop.get("type") or "bom",
-                    "severity": prop.get("severity") or "",
-                    "urgency": prop.get("urgency") or "",
-                    "area": prop.get("areaName") or prop.get("areaDesc") or "",
+                    "id": None,
+                    "title": m.group("msg").strip()[:50],
+                    "description": m.group("msg").strip(),
+                    "instruction": "",
+                    "category": "log",
+                    "severity": m.group("severity"),
+                    "urgency": "",
+                    "area": "",
                     "lat": None,
                     "lon": None,
-                    "source": "BOM",
-                    "date": pd.to_datetime(prop.get("issueTime")) if prop.get("issueTime") else None,
-                    "raw": f
+                    "source": "LOG",
+                    "date": date,
+                    "raw": {"line": line.strip()}
                 })
-            return rows
-    # generic fallback: try to flatten dict
-    if isinstance(raw, list):
-        for r in raw:
-            rows.append({
-                "id": r.get("id") if isinstance(r, dict) else None,
-                "title": r.get("title") if isinstance(r, dict) else str(r),
-                "description": r.get("description") if isinstance(r, dict) else "",
-                "category": "bom",
-                "severity": r.get("severity") if isinstance(r, dict) else "",
-                "urgency": None,
-                "area": r.get("area") if isinstance(r, dict) else "",
-                "lat": None,
-                "lon": None,
-                "source": "BOM",
-                "date": pd.to_datetime(r.get("date")) if isinstance(r, dict) and r.get("date") else None,
-                "raw": r
-            })
-    return rows
+    return pd.DataFrame(rows)
 
-def _imd_to_rows(raw):
-    # IMD sample parsing stub
-    rows = []
-    if not raw:
-        return rows
-    if isinstance(raw, list):
-        for r in raw:
-            rows.append({
-                "id": r.get("id"),
-                "title": r.get("title"),
-                "description": r.get("desc") or r.get("description") or "",
-                "category": r.get("category") or "imd",
-                "severity": r.get("severity") or "",
-                "urgency": r.get("urgency") or "",
-                "area": r.get("area") or "",
-                "lat": r.get("lat"),
-                "lon": r.get("lon"),
-                "source": "IMD",
-                "date": pd.to_datetime(r.get("date")) if r.get("date") else None,
-                "raw": r
-            })
-    elif isinstance(raw, dict):
-        # try common keys
-        for k, v in raw.items():
-            rows.extend(_imd_to_rows(v))
-    return rows
 
-def unify_alerts_to_df(sources: dict):
+def clean_events(df):
     """
-    Input: dict returned from utils.api.fetch_all-like functions
-    Output: pandas DataFrame with unified schema:
-      id,title,description,category,severity,urgency,area,lat,lon,source,date,raw
+    Standardize DataFrame columns and drop empty rows.
     """
-    rows = []
-    # USGS
-    usgs = sources.get("USGS")
-    if usgs:
-        for f in usgs:
-            try:
-                rows.append(_usgs_feature_to_row(f))
-            except Exception:
-                continue
-    nws = sources.get("NWS")
-    if nws:
-        for f in nws:
-            try:
-                rows.append(_nws_feature_to_row(f))
-            except Exception:
-                continue
-    bom = sources.get("BOM")
-    if bom:
-        try:
-            rows.extend(_bom_to_rows(bom))
-        except Exception:
-            pass
-    imd = sources.get("IMD")
-    if imd:
-        try:
-            rows.extend(_imd_to_rows(imd))
-        except Exception:
-            pass
-
-    # If sources includes raw sample lists (like dict keys), also try to parse them:
-    # if user passed features under other keys: try to auto-detect features key
-    for k,v in sources.items():
-        if k in ("USGS","NWS","BOM","IMD"):
-            continue
-        if isinstance(v, dict) and "features" in v:
-            for f in v.get("features", []):
-                # guess USGS-like
-                try:
-                    rows.append(_usgs_feature_to_row(f))
-                except Exception:
-                    pass
-
-    df = pd.DataFrame(rows)
-    # Ensure required columns exist
-    for c in ["id","title","description","category","severity","urgency","area","lat","lon","source","date","raw"]:
-        if c not in df.columns:
-            df[c] = None
-    # Normalize date
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    expected_cols = ["id","title","description","instruction","category",
+                     "severity","urgency","area","lat","lon","source","date","raw"]
+    for col in expected_cols:
+        if col not in df.columns:
+            df[col] = None
+    df = df[expected_cols]
+    df = df.dropna(subset=["title", "date"], how="any")
     return df
+
+
+def generate_summary(df):
+    """
+    Generate summary stats text for display.
+    """
+    if df.empty:
+        return "No events found."
+    total = len(df)
+    critical_count = len(df[df["severity"].str.contains("Severe|Critical|Warning", case=False, na=False)])
+    unique_categories = df["category"].nunique()
+    period = f"{df['date'].min().date()} to {df['date'].max().date()}"
+    return f"Period: {period}\nTotal Events: {total}\nCritical Events: {critical_count}\nUnique Categories: {unique_categories}"
+
 
