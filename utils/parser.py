@@ -10,7 +10,7 @@ def unify_alerts_to_df(alerts_dict):
     records = []
 
     # USGS feed
-    if "USGS" in alerts_dict and alerts_dict["USGS"]:
+    if isinstance(alerts_dict.get("USGS"), dict):
         for feat in alerts_dict["USGS"].get("features", []):
             props = feat.get("properties", {})
             records.append({
@@ -23,7 +23,7 @@ def unify_alerts_to_df(alerts_dict):
             })
 
     # NWS feed
-    if "NWS" in alerts_dict and alerts_dict["NWS"]:
+    if isinstance(alerts_dict.get("NWS"), dict):
         for feat in alerts_dict["NWS"].get("features", []):
             props = feat.get("properties", {})
             records.append({
@@ -36,31 +36,28 @@ def unify_alerts_to_df(alerts_dict):
             })
 
     # BOM feed
-    if "BOM" in alerts_dict and alerts_dict["BOM"]:
-        # Adapt to BOM JSON structure
-        if isinstance(alerts_dict["BOM"], dict) and "warnings" in alerts_dict["BOM"]:
-            for w in alerts_dict["BOM"]["warnings"]:
-                records.append({
-                    "source": "BOM",
-                    "title": w.get("title"),
-                    "area": w.get("area", {}).get("description"),
-                    "severity": w.get("severity", "N/A"),
-                    "date": pd.to_datetime(w.get("issued_at")),
-                    "details": w.get("description")
-                })
+    if isinstance(alerts_dict.get("BOM"), dict) and "warnings" in alerts_dict["BOM"]:
+        for w in alerts_dict["BOM"]["warnings"]:
+            records.append({
+                "source": "BOM",
+                "title": w.get("title"),
+                "area": w.get("area", {}).get("description"),
+                "severity": w.get("severity", "N/A"),
+                "date": pd.to_datetime(w.get("issued_at")),
+                "details": w.get("description")
+            })
 
     # IMD feed
-    if "IMD" in alerts_dict and alerts_dict["IMD"]:
-        if isinstance(alerts_dict["IMD"], list):
-            for alert in alerts_dict["IMD"]:
-                records.append({
-                    "source": "IMD",
-                    "title": alert.get("title"),
-                    "area": alert.get("area"),
-                    "severity": alert.get("severity", "N/A"),
-                    "date": pd.to_datetime(alert.get("date")),
-                    "details": alert.get("details")
-                })
+    if isinstance(alerts_dict.get("IMD"), list):
+        for alert in alerts_dict["IMD"]:
+            records.append({
+                "source": "IMD",
+                "title": alert.get("title"),
+                "area": alert.get("area"),
+                "severity": alert.get("severity", "N/A"),
+                "date": pd.to_datetime(alert.get("date")),
+                "details": alert.get("details")
+            })
 
     # Build DataFrame
     df = pd.DataFrame(records)
@@ -72,6 +69,7 @@ def unify_alerts_to_df(alerts_dict):
         df = df.sort_values("date", ascending=False)
 
     return df
+
 
 
 
