@@ -1,14 +1,86 @@
 # utils/api.py
 import json
 import requests
-from pathlib import Path
 import pandas as pd
+from pathlib import Path
 from .parser import load_file, clean_events
 
-def fetch_bom_alerts():
+# ========================
+# USGS Earthquake Alerts
+# ========================
+def fetch_usgs_alerts():
     """
-    Fetch BOM Australia alerts from the official GeoJSON feed.
-    Returns DataFrame.
+    Fetch recent earthquake data from USGS.
+    Returns standardized DataFrame.
+    """
+    url = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = []
+        for feat in data.get("features", []):
+            props = feat["properties"]
+            coords = feat["geometry"]["coordinates"]
+            rows.append({
+                "id": feat["id"],
+                "title": props.get("title", "Earthquake"),
+                "description": f"Magnitude {props.get('mag', 'N/A')} earthquake",
+                "category": "Earthquake",
+                "severity": "Moderate" if props.get("mag", 0) < 6 else "Severe",
+                "urgency": "Immediate",
+                "area": props.get("place", ""),
+                "coordinates": [coords[0], coords[1]],
+                "source": "USGS",
+                "date": pd.to_datetime(props.get("time"), unit="ms")
+            })
+        return pd.DataFrame(rows)
+    except Exception as e:
+        print(f"USGS fetch error: {e}")
+        return pd.DataFrame()
+
+# ========================
+# NWS (US National Weather Service)
+# ========================
+def fetch_nws_alerts():
+    """
+    Fetch US weather alerts from NWS API.
+    """
+    url = "https://api.weather.gov/alerts/active"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        rows = []
+        for feat in data.get("features", []):
+            props = feat["properties"]
+            area_desc = props.get("areaDesc", "")
+            coords = None
+            if "geometry" in feat and feat["geometry"]:
+                coords = feat["geometry"]["coordinates"][0][0] if feat["geometry"]["coordinates"] else None
+            rows.append({
+                "id": props.get("id", ""),
+                "title": props.get("headline", "Weather Alert"),
+                "description": props.get("description", ""),
+                "category": props.get("event", "Weather"),
+                "severity": props.get("severity", "Unknown"),
+                "urgency": props.get("urgency", "Expected"),
+                "area": area_desc,
+                "coordinates": coords,
+                "source": "NWS",
+                "date": pd.to_datetime(props.get("sent"))
+            })
+        return pd.DataFrame(rows)
+    except Exception as e:
+        print(f"NWS fetch error: {e}")
+        return pd.DataFrame()
+
+# ========================
+# BOM Australia Warnings
+# ========================
+def fetch_bom_warnings():
+    """
+    Fetch BOM Australia warnings (demo feed).
     """
     url = "https://api.weather.bom.gov.au/v1/warnings"
     try:
@@ -20,16 +92,19 @@ def fetch_bom_alerts():
         return clean_events(df)
     except Exception as e:
         print(f"BOM fetch error: {e}")
+        sample_path = Path(__file__).parent.parent / "data" / "sample_bom.json"
+        if sample_path.exists():
+            return clean_events(load_file(sample_path))
         return pd.DataFrame()
 
-
+# ========================
+# IMD India Alerts
+# ========================
 def fetch_imd_alerts():
     """
-    Fetch IMD India alerts from live API if available.
-    Fallback to sample_imd.json in /data if fetch fails.
+    Fetch IMD India alerts from API or fallback to sample file.
     """
-    # Hypothetical IMD API endpoint (real ones often require scraping or RSS)
-    imd_url = "https://internal-imd.gov.in/api/alerts"  # Replace with actual
+    imd_url = "https://internal-imd.gov.in/api/alerts"  # placeholder, needs replacement
     try:
         resp = requests.get(imd_url, timeout=10)
         resp.raise_for_status()
@@ -43,20 +118,5 @@ def fetch_imd_alerts():
         if sample_path.exists():
             return clean_events(load_file(sample_path))
         return pd.DataFrame()
-
-
-def fetch_local_samples():
-    """
-    Load both BOM and IMD sample files from /data.
-    """
-    data_dir = Path(__file__).parent.parent / "data"
-    dfs = []
-    for file in data_dir.glob("*.json"):
-        df = load_file(file)
-        if not df.empty:
-            dfs.append(clean_events(df))
-    if dfs:
-        return pd.concat(dfs, ignore_index=True)
-    return pd.DataFrame()
 
 
