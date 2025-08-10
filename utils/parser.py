@@ -4,71 +4,79 @@ import pandas as pd
 from datetime import datetime
 
 def unify_alerts_to_df(alerts_dict):
-    """
-    Convert alerts from multiple APIs (USGS, NWS, BOM, IMD) into one DataFrame.
-    """
-    records = []
+    """Unify alerts from multiple sources into one DataFrame."""
+    all_rows = []
 
-    # USGS feed
-    if isinstance(alerts_dict.get("USGS"), dict):
-        for feat in alerts_dict["USGS"].get("features", []):
-            props = feat.get("properties", {})
-            records.append({
-                "source": "USGS",
-                "title": props.get("title"),
-                "area": props.get("place"),
-                "severity": props.get("alert") or "N/A",
-                "date": datetime.utcfromtimestamp(props.get("time", 0) / 1000) if props.get("time") else None,
-                "details": props.get("url")
-            })
+    for source, data in alerts_dict.items():
+        if not data:
+            continue
 
-    # NWS feed
-    if isinstance(alerts_dict.get("NWS"), dict):
-        for feat in alerts_dict["NWS"].get("features", []):
-            props = feat.get("properties", {})
-            records.append({
-                "source": "NWS",
-                "title": props.get("headline"),
-                "area": props.get("areaDesc"),
-                "severity": props.get("severity"),
-                "date": pd.to_datetime(props.get("effective")),
-                "details": props.get("description")
-            })
+        # USGS Earthquake format
+        if source == "USGS" and "features" in data:
+            for feat in data["features"]:
+                props = feat.get("properties", {})
+                all_rows.append({
+                    "source": source,
+                    "title": props.get("title"),
+                    "date": pd.to_datetime(props.get("time"), unit="ms", errors="coerce"),
+                    "severity": props.get("alert", "info"),
+                    "area": props.get("place"),
+                    "category": "earthquake"
+                })
 
-    # BOM feed
-    if isinstance(alerts_dict.get("BOM"), dict) and "warnings" in alerts_dict["BOM"]:
-        for w in alerts_dict["BOM"]["warnings"]:
-            records.append({
-                "source": "BOM",
-                "title": w.get("title"),
-                "area": w.get("area", {}).get("description"),
-                "severity": w.get("severity", "N/A"),
-                "date": pd.to_datetime(w.get("issued_at")),
-                "details": w.get("description")
-            })
+        # NWS Alerts
+        elif source == "NWS" and "features" in data:
+            for feat in data["features"]:
+                props = feat.get("properties", {})
+                all_rows.append({
+                    "source": source,
+                    "title": props.get("headline"),
+                    "date": pd.to_datetime(props.get("onset"), errors="coerce"),
+                    "severity": props.get("severity", "unknown"),
+                    "area": props.get("areaDesc"),
+                    "category": props.get("event", "weather")
+                })
 
-    # IMD feed
-    if isinstance(alerts_dict.get("IMD"), list):
-        for alert in alerts_dict["IMD"]:
-            records.append({
-                "source": "IMD",
-                "title": alert.get("title"),
-                "area": alert.get("area"),
-                "severity": alert.get("severity", "N/A"),
-                "date": pd.to_datetime(alert.get("date")),
-                "details": alert.get("details")
-            })
+        # BOM (Australia)
+        elif source == "BOM" and isinstance(data, dict):
+            warnings = data.get("warnings", [])
+            for w in warnings:
+                all_rows.append({
+                    "source": source,
+                    "title": w.get("title"),
+                    "date": pd.to_datetime(w.get("issue_time_utc"), errors="coerce"),
+                    "severity": w.get("severity", "unknown"),
+                    "area": w.get("area", "N/A"),
+                    "category": w.get("type", "weather")
+                })
 
-    # Build DataFrame
-    df = pd.DataFrame(records)
+        # IMD (India)
+        elif source == "IMD" and isinstance(data, list):
+            for w in data:
+                all_rows.append({
+                    "source": source,
+                    "title": w.get("title"),
+                    "date": pd.to_datetime(w.get("date"), errors="coerce"),
+                    "severity": w.get("severity", "unknown"),
+                    "area": w.get("area", "N/A"),
+                    "category": w.get("category", "weather")
+                })
 
-    # Ensure datetime conversion
+    # Create DataFrame
+    df = pd.DataFrame(all_rows)
+
+    # Ensure date column exists
     if not df.empty:
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        df = df.dropna(subset=["date"])
+        if "date" not in df.columns:
+            df["date"] = pd.NaT
         df = df.sort_values("date", ascending=False)
 
+        # Ensure category column exists
+        if "category" not in df.columns or df["category"].isnull().all():
+            df["category"] = df.get("source", "unknown")
+
     return df
+
 
 
 
