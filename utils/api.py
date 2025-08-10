@@ -1,89 +1,62 @@
 # utils/api.py
-import requests
-from datetime import datetime, timedelta
 import json
+import requests
 from pathlib import Path
+import pandas as pd
+from .parser import load_file, clean_events
 
-# ---------- USGS (Earthquakes) ----------
-USGS_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"
-
-def fetch_usgs_alerts():
-    """Return raw feature list from USGS GeoJSON (earthquakes)."""
-    resp = requests.get(USGS_URL, timeout=15)
-    resp.raise_for_status()
-    obj = resp.json()
-    features = obj.get("features", [])
-    return features
-
-# ---------- NWS (US Weather Alerts) ----------
-NWS_URL = "https://api.weather.gov/alerts"
-
-def fetch_nws_alerts(area=None):
+def fetch_bom_alerts():
     """
-    Fetch NWS alerts. Optionally filter by area/state code (e.g., 'CA').
-    Returns list of features (GeoJSON-like).
+    Fetch BOM Australia alerts from the official GeoJSON feed.
+    Returns DataFrame.
     """
-    params = {}
-    if area:
-        params["area"] = area
-    resp = requests.get(NWS_URL, params=params, timeout=15, headers={"User-Agent":"disaster-dashboard/1.0"})
-    resp.raise_for_status()
-    obj = resp.json()
-    features = obj.get("features", [])
-    return features
+    url = "https://api.weather.bom.gov.au/v1/warnings"
+    try:
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        tmp = Path("/tmp/bom.json")
+        tmp.write_text(resp.text, encoding="utf-8")
+        df = load_file(tmp)
+        return clean_events(df)
+    except Exception as e:
+        print(f"BOM fetch error: {e}")
+        return pd.DataFrame()
 
-# ---------- BOM Australia (STUB / sample) ----------
-# BOM does not publish a single universal JSON feed publicly with stable endpoints.
-# Users often use BOM XML/RSS or government data services. We include a sample loader fallback:
-BOM_SAMPLE = Path(__file__).resolve().parents[1] / "data" / "sample_bom.json"
-
-def fetch_bom_warnings():
-    """
-    Attempt to fetch BOM warnings. By default this function will try well-known BOM endpoints,
-    but also falls back to sample JSON in /data.
-    If you have a BOM endpoint (e.g. FWO feed), replace or extend this function.
-    """
-    # Try a few heuristic endpoints (may fail)
-    candidate_urls = [
-        "http://www.bom.gov.au/fwo/IDN10001/IDN10001.json",  # example (may 404)
-    ]
-    for url in candidate_urls:
-        try:
-            r = requests.get(url, timeout=10)
-            if r.ok:
-                try:
-                    return r.json()
-                except Exception:
-                    continue
-        except Exception:
-            continue
-
-    # fallback: load sample JSON shipped with repo
-    if BOM_SAMPLE.exists():
-        with open(BOM_SAMPLE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
-
-# ---------- IMD India (STUB / sample) ----------
-IMD_SAMPLE = Path(__file__).resolve().parents[1] / "data" / "sample_imd.json"
 
 def fetch_imd_alerts():
     """
-    IMD doesn't offer a widely documented public JSON API; many integrations require scraping or RSS.
-    This function falls back to sample data. If you have a specific IMD feed endpoint, plug it in here.
+    Fetch IMD India alerts from live API if available.
+    Fallback to sample_imd.json in /data if fetch fails.
     """
-    # If you know an IMD endpoint, try it here (example left empty)
-    # e.g. url = "https://mausam.imd.gov.in/some-endpoint.json"
-    # try:
-    #     r = requests.get(url, timeout=10)
-    #     r.raise_for_status()
-    #     return r.json()
-    # except Exception:
-    #     pass
+    # Hypothetical IMD API endpoint (real ones often require scraping or RSS)
+    imd_url = "https://internal-imd.gov.in/api/alerts"  # Replace with actual
+    try:
+        resp = requests.get(imd_url, timeout=10)
+        resp.raise_for_status()
+        tmp = Path("/tmp/imd.json")
+        tmp.write_text(resp.text, encoding="utf-8")
+        df = load_file(tmp)
+        return clean_events(df)
+    except Exception as e:
+        print(f"IMD fetch failed, using sample file: {e}")
+        sample_path = Path(__file__).parent.parent / "data" / "sample_imd.json"
+        if sample_path.exists():
+            return clean_events(load_file(sample_path))
+        return pd.DataFrame()
 
-    if IMD_SAMPLE.exists():
-        import json
-        with open(IMD_SAMPLE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return []
+
+def fetch_local_samples():
+    """
+    Load both BOM and IMD sample files from /data.
+    """
+    data_dir = Path(__file__).parent.parent / "data"
+    dfs = []
+    for file in data_dir.glob("*.json"):
+        df = load_file(file)
+        if not df.empty:
+            dfs.append(clean_events(df))
+    if dfs:
+        return pd.concat(dfs, ignore_index=True)
+    return pd.DataFrame()
+
 
