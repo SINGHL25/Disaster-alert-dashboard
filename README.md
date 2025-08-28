@@ -1,4 +1,5 @@
 # Disaster-alert-dashboard
+<img width="683" height="677" alt="image" src="https://github.com/user-attachments/assets/a4442b68-2c0d-4239-94c3-f6a8a859a774" />
 
 # Global Disaster & Emergency Alert System
 
